@@ -103,9 +103,14 @@ func imageExists(namespace string, clientConfig *rest.Config, registryCollector 
 		return false, errors.Wrap(err, "failed to get auth config")
 	}
 
-	insecureTransport := &http.Transport{ //nolint:gosec
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+	// remote.DefaultTransport includes Proxy (HTTP_PROXY/HTTPS_PROXY), dial/TLS
+	// timeouts, and keepalive; clone it so InsecureSkipVerify does not drop those.
+	defaultTR, ok := remote.DefaultTransport.(*http.Transport)
+	if !ok {
+		return false, errors.New("remote.DefaultTransport is not *http.Transport")
 	}
+	insecureTransport := defaultTR.Clone()
+	insecureTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 
 	if deadline == 0 {
 		deadline = 10 * time.Second
