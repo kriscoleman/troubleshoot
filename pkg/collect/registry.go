@@ -133,7 +133,11 @@ func imageExists(namespace string, clientConfig *rest.Config, registryCollector 
 				}))
 			}
 
-			_, err := remote.Head(ref, opts...)
+			// Use Get (not Head) so 404 responses include a JSON body; the registry
+			// API encodes MANIFEST_UNKNOWN vs NAME_UNKNOWN there, which we need to
+			// distinguish. Head 404s typically have no body, so *transport.Error has
+			// empty Errors and we cannot classify the failure.
+			_, err := remote.Get(ref, opts...)
 			return err
 		}()
 		if err == nil {
@@ -292,13 +296,28 @@ func getImageAuthConfigFromSecret(clientConfig *rest.Config, imageRef name.Refer
 	return config, nil
 }
 
-// isNotFound returns true if err represents a registry response that says the
-// requested manifest does not exist. go-containerregistry surfaces these as
-// *transport.Error with HTTP 404.
+// isNotFound returns true only when the registry reports MANIFEST_UNKNOWN: the
+// repository exists but the tag or digest has no manifest. A 404 with
+// NAME_UNKNOWN (repository missing) is not "not found" in that sense; callers
+// should see the error to diagnose a wrong image path. Unstructured 404s
+// (e.g. empty body on HEAD) are not treated as a known-missing image.
 func isNotFound(err error) bool {
 	var terr *transport.Error
-	if stderrors.As(err, &terr) {
-		return terr.StatusCode == http.StatusNotFound
+	if !stderrors.As(err, &terr) || terr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	if len(terr.Errors) == 0 {
+		return false
+	}
+	for _, d := range terr.Errors {
+		if d.Code == transport.NameUnknownErrorCode {
+			return false
+		}
+	}
+	for _, d := range terr.Errors {
+		if d.Code == transport.ManifestUnknownErrorCode {
+			return true
+		}
 	}
 	return false
 }

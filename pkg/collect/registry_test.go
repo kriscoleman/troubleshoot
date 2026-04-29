@@ -193,6 +193,22 @@ func TestImageExists_NotFound(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestImageExists_NameUnknown_PropagatesError(t *testing.T) {
+	fr := newFakeRegistry(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"NAME_UNKNOWN","message":"repository name not known to registry"}]}`))
+	})
+
+	collector := &v1beta2.RegistryImages{
+		Images: []string{fmt.Sprintf("%s/nonexistentrepo/image:latest", fr.hostPort())},
+	}
+	exists, err := imageExists("default", &rest.Config{}, collector, fmt.Sprintf("%s/nonexistentrepo/image:latest", fr.hostPort()), 5*time.Second)
+
+	assert.Error(t, err)
+	assert.False(t, exists)
+}
+
 func TestImageExists_Unauthorized(t *testing.T) {
 	fr := newFakeRegistry(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Www-Authenticate", `Basic realm="registry"`)
